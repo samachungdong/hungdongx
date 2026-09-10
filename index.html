@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Data Cloud Ingest Test</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 20px; }
+  button { font-size: 15px; padding: 10px 18px; margin: 6px 8px 6px 0; cursor: pointer; }
+  #log { background: #111; color: #0f0; font-family: Menlo, monospace; font-size: 12px; padding: 12px;
+         border-radius: 6px; height: 340px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .status { padding: 8px 12px; border-radius: 6px; margin: 10px 0; font-weight: bold; }
+  .status.pending { background: #fff3cd; }
+  .status.ok      { background: #d4edda; }
+  .status.fail    { background: #f8d7da; }
+</style>
+</head>
+<body>
+
+<h1>Data Cloud — Ingest Test Page</h1>
+<p>Trang test đơn giản, không dùng để thay cho website thật — chỉ để kiểm tra 1 data stream/sitemap
+mới có ingest được vào Data Cloud hay không, tách biệt hoàn toàn khỏi mọi vấn đề GTM/LiteSpeed của
+custodian.com.au.</p>
+
+<div id="beaconStatus" class="status pending">Beacon: chưa load...</div>
+<div id="initStatus" class="status pending">SI.init: chưa chạy...</div>
+
+<button id="btnSendPageview">Gửi lại Page View</button>
+<button id="btnSendTest">Gửi Test Event (mỗi lần bấm là 1 event mới)</button>
+
+<h3>Log</h3>
+<pre id="log"></pre>
+
+<!--
+  ============================================================================
+  BƯỚC BẮT BUỘC TRƯỚC KHI DÙNG:
+  1) Vào Setup > Data Cloud > Websites & Mobile Apps > tạo 1 connector mới
+     (loại Website), đặt Website Base URL đúng bằng domain thật mà trang này
+     sẽ được publish lên (xem ghi chú "Google Sites" bên dưới — domain có thể
+     KHÔNG phải sites.google.com/... như bạn nghĩ).
+  2) Copy link script trong "Add the Script to your source code" của connector
+     đó, dán đè vào src bên dưới (thay toàn bộ dòng src="...").
+  ============================================================================
+-->
+<script id="beaconScript"
+        src="PASTE_YOUR_NEW_DATA_STREAM_C360A_SCRIPT_URL_HERE"></script>
+
+<script>
+(function () {
+  "use strict";
+  if (window.__testIngestBooted) return;
+  window.__testIngestBooted = true;
+
+  var logEl = document.getElementById("log");
+  function log(msg) {
+    var t = new Date().toISOString().split("T")[1].replace("Z", "");
+    logEl.textContent += "[" + t + "] " + msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+    console.log(msg);
+  }
+  function setStatus(id, cls, text) {
+    var el = document.getElementById(id);
+    el.className = "status " + cls;
+    el.textContent = text;
+  }
+
+  var beaconSrc = document.getElementById("beaconScript").src;
+  if (!beaconSrc || beaconSrc.indexOf("PASTE_YOUR_NEW_DATA_STREAM") !== -1) {
+    setStatus("beaconStatus", "fail", "Beacon: CHƯA dán script URL — sửa src trong <script id=\"beaconScript\"> trước.");
+    log("Chưa cấu hình beacon src. Dừng lại, không thử init.");
+    return;
+  }
+
+  document.getElementById("beaconScript").addEventListener("load", function () {
+    setStatus("beaconStatus", "ok", "Beacon: load thành công (" + beaconSrc + ")");
+    log("c360a.min.js loaded OK.");
+  });
+  document.getElementById("beaconScript").addEventListener("error", function () {
+    setStatus("beaconStatus", "fail", "Beacon: LOAD LỖI — kiểm tra lại URL / domain có bị chặn CORS không.");
+    log("c360a.min.js failed to load.");
+  });
+
+  var SI_READY = false;
+
+  function boot() {
+    var SI = window.SalesforceInteractions;
+    if (!SI) return;
+
+    try { SI.setLoggingLevel(5); } catch (e) { log("setLoggingLevel error: " + e); }
+
+    SI.init({
+      // cookieDomain: để trống hoặc set đúng domain thật trang này chạy trên đó.
+      // Nếu Google Sites nhúng qua iframe sandbox (một domain khác hẳn), cứ để
+      // SDK tự dùng domain hiện tại, không cần khai báo cookieDomain cố định.
+      consents: [
+        { provider: "TestIngest Page", purpose: "Tracking", status: "Opt In" }
+      ]
+    }).then(function () {
+      SI_READY = true;
+      setStatus("initStatus", "ok", "SI.init: thành công, sitemap đã sẵn sàng.");
+      log("SalesforceInteractions.init() resolved OK.");
+
+      var pageTypes = [
+        { name: "test_home", isMatch: function () { return true; }, interaction: { name: "Test_Home_View" } }
+      ];
+
+      SI.initSitemap({
+        global: {
+          locale: "en_US",
+          onActionEvent: function (ae) {
+            try {
+              ae.interaction = ae.interaction || {};
+              if (!ae.interaction.name) ae.interaction.name = "Test_Unnamed_Event";
+            } catch (e) {}
+            return ae;
+          }
+        },
+        pageTypes: pageTypes,
+        pageTypeDefault: { name: "test_default", interaction: { name: "Test_Page_View" } }
+      });
+      log("initSitemap() called — 1 page view event should fire now.");
+    }).catch(function (e) {
+      setStatus("initStatus", "fail", "SI.init: THẤT BẠI — xem log.");
+      log("SI.init failed: " + e);
+    });
+  }
+
+  if (window.SalesforceInteractions) {
+    boot();
+  } else {
+    var tries = 0;
+    var poll = setInterval(function () {
+      if (window.SalesforceInteractions) { clearInterval(poll); boot(); }
+      else if (++tries > 100) { clearInterval(poll); log("Beacon never became ready after 10s."); }
+    }, 100);
+  }
+
+  var manualCounter = 0;
+  document.getElementById("btnSendPageview").addEventListener("click", function () {
+    if (!SI_READY) { log("Chưa init xong, thử lại sau."); return; }
+    window.SalesforceInteractions.sendEvent({
+      interaction: { name: "Test_Manual_Pageview" }
+    });
+    log("Manually sent: Test_Manual_Pageview");
+  });
+
+  document.getElementById("btnSendTest").addEventListener("click", function () {
+    if (!SI_READY) { log("Chưa init xong, thử lại sau."); return; }
+    manualCounter++;
+    window.SalesforceInteractions.sendEvent({
+      interaction: {
+        name: "Test_Manual_Event",
+        attributes: { testSeq: manualCounter, clickedAt: new Date().toISOString() }
+      }
+    });
+    log("Manually sent: Test_Manual_Event #" + manualCounter);
+  });
+})();
+</script>
+
+</body>
+</html>
