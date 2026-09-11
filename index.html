@@ -18,19 +18,18 @@
 <body>
 
 <h1>Data Cloud — Ingest Test Page</h1>
-<p>Trang test đơn giản, không dùng để thay cho website thật — chỉ để kiểm tra 1 data stream/sitemap
-mới có ingest được vào Data Cloud hay không, tách biệt hoàn toàn khỏi mọi vấn đề GTM/LiteSpeed của
+<p>Simple test page, not a replacement for the real website — only used to check whether a new
+data stream/sitemap can ingest into Data Cloud, fully isolated from the GTM/LiteSpeed issues on
 custodian.com.au.</p>
 
-<div id="beaconStatus" class="status pending">Beacon: chưa load...</div>
-<div id="initStatus" class="status pending">SI.init: chưa chạy...</div>
+<div id="beaconStatus" class="status pending">Beacon: not loaded yet...</div>
+<div id="initStatus" class="status pending">SI.init: not run yet...</div>
 
-<button id="btnSendPageview">Gửi lại Page View</button>
-<button id="btnSendTest">Gửi Test Event (mỗi lần bấm là 1 event mới)</button>
+<button id="btnSendPageview">Resend Page View</button>
+<button id="btnSendTest">Send Test Event (each click is a new event)</button>
 
 <h3>Log</h3>
 <pre id="log"></pre>
-
 
 <script id="beaconScript"
         src="https://cdn.c360a.salesforce.com/beacon/c360a/f4bb63bd-2cf4-42d3-81a6-6667cb2e8b2f/scripts/c360a.min.js"></script>
@@ -56,17 +55,17 @@ custodian.com.au.</p>
 
   var beaconSrc = document.getElementById("beaconScript").src;
   if (!beaconSrc || beaconSrc.indexOf("PASTE_YOUR_NEW_DATA_STREAM") !== -1) {
-    setStatus("beaconStatus", "fail", "Beacon: CHƯA dán script URL — sửa src trong <script id=\"beaconScript\"> trước.");
-    log("Chưa cấu hình beacon src. Dừng lại, không thử init.");
+    setStatus("beaconStatus", "fail", "Beacon: script URL NOT set — edit the src on <script id=\"beaconScript\"> first.");
+    log("Beacon src not configured. Stopping, will not attempt init.");
     return;
   }
 
   document.getElementById("beaconScript").addEventListener("load", function () {
-    setStatus("beaconStatus", "ok", "Beacon: load thành công (" + beaconSrc + ")");
+    setStatus("beaconStatus", "ok", "Beacon: loaded successfully (" + beaconSrc + ")");
     log("c360a.min.js loaded OK.");
   });
   document.getElementById("beaconScript").addEventListener("error", function () {
-    setStatus("beaconStatus", "fail", "Beacon: LOAD LỖI — kiểm tra lại URL / domain có bị chặn CORS không.");
+    setStatus("beaconStatus", "fail", "Beacon: LOAD FAILED — check the URL / whether the domain is blocked by CORS.");
     log("c360a.min.js failed to load.");
   });
 
@@ -79,15 +78,16 @@ custodian.com.au.</p>
     try { SI.setLoggingLevel(5); } catch (e) { log("setLoggingLevel error: " + e); }
 
     SI.init({
-      // cookieDomain: để trống hoặc set đúng domain thật trang này chạy trên đó.
-      // Nếu Google Sites nhúng qua iframe sandbox (một domain khác hẳn), cứ để
-      // SDK tự dùng domain hiện tại, không cần khai báo cookieDomain cố định.
+      // cookieDomain: leave unset, or set it to whatever domain this page
+      // actually runs on. If it ends up embedded via a sandboxed iframe (a
+      // different domain entirely), just let the SDK use the current domain
+      // instead of hardcoding one.
       consents: [
         { provider: "TestIngest Page", purpose: "Tracking", status: "Opt In" }
       ]
     }).then(function () {
       SI_READY = true;
-      setStatus("initStatus", "ok", "SI.init: thành công, sitemap đã sẵn sàng.");
+      setStatus("initStatus", "ok", "SI.init: success, sitemap is ready.");
       log("SalesforceInteractions.init() resolved OK.");
 
       var pageTypes = [
@@ -110,7 +110,7 @@ custodian.com.au.</p>
       });
       log("initSitemap() called — 1 page view event should fire now.");
     }).catch(function (e) {
-      setStatus("initStatus", "fail", "SI.init: THẤT BẠI — xem log.");
+      setStatus("initStatus", "fail", "SI.init: FAILED — see log.");
       log("SI.init failed: " + e);
     });
   }
@@ -127,7 +127,7 @@ custodian.com.au.</p>
 
   var manualCounter = 0;
   document.getElementById("btnSendPageview").addEventListener("click", function () {
-    if (!SI_READY) { log("Chưa init xong, thử lại sau."); return; }
+    if (!SI_READY) { log("Init not finished yet, try again shortly."); return; }
     window.SalesforceInteractions.sendEvent({
       interaction: { name: "Test_Manual_Pageview" }
     });
@@ -135,7 +135,7 @@ custodian.com.au.</p>
   });
 
   document.getElementById("btnSendTest").addEventListener("click", function () {
-    if (!SI_READY) { log("Chưa init xong, thử lại sau."); return; }
+    if (!SI_READY) { log("Init not finished yet, try again shortly."); return; }
     manualCounter++;
     window.SalesforceInteractions.sendEvent({
       interaction: {
