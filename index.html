@@ -18,13 +18,15 @@
 <body>
 
 <h1>Data Cloud — Ingest Test Page</h1>
-<p>Simple test page, not a replacement for the real website — only used to check whether a new
-data stream/sitemap can ingest into Data Cloud</p>
+<p>Simple test page, not a replacement for the real website — only used to check whether a data
+stream ingests into Data Cloud. This page carries NO sitemap logic of its own — SI.init() and
+initSitemap() are expected to come from whatever is uploaded via Setup's "Replace Sitemap" for this
+connector, exactly like the real deployment model for custodian.com.au will work. This page only
+loads the beacon and exposes a couple of manual test buttons.</p>
 
-<div id="beaconStatus" class="status pending">Beacon: not loaded yet...</div>
-<div id="initStatus" class="status pending">SI.init: not run yet...</div>
+<div id="siStatus" class="status pending">SalesforceInteractions: not ready yet...</div>
 
-<button id="btnSendPageview">Resend Page View</button>
+<button id="btnSendPageview">Send Test Pageview</button>
 <button id="btnSendTest">Send Test Event (each click is a new event)</button>
 
 <h3>Log</h3>
@@ -36,8 +38,8 @@ data stream/sitemap can ingest into Data Cloud</p>
 <script>
 (function () {
   "use strict";
-  if (window.__testIngestBooted) return;
-  window.__testIngestBooted = true;
+  if (window.__testIngestPageBooted) return;
+  window.__testIngestPageBooted = true;
 
   var logEl = document.getElementById("log");
   function log(msg) {
@@ -52,81 +54,34 @@ data stream/sitemap can ingest into Data Cloud</p>
     el.textContent = text;
   }
 
-  var beaconSrc = document.getElementById("beaconScript").src;
-  if (!beaconSrc || beaconSrc.indexOf("PASTE_YOUR_NEW_DATA_STREAM") !== -1) {
-    setStatus("beaconStatus", "fail", "Beacon: script URL NOT set — edit the src on <script id=\"beaconScript\"> first.");
-    log("Beacon src not configured. Stopping, will not attempt init.");
-    return;
-  }
-
   document.getElementById("beaconScript").addEventListener("load", function () {
-    setStatus("beaconStatus", "ok", "Beacon: loaded successfully (" + beaconSrc + ")");
     log("c360a.min.js loaded OK.");
   });
   document.getElementById("beaconScript").addEventListener("error", function () {
-    setStatus("beaconStatus", "fail", "Beacon: LOAD FAILED — check the URL / whether the domain is blocked by CORS.");
     log("c360a.min.js failed to load.");
   });
 
-  var SI_READY = false;
-
-  function boot() {
-    var SI = window.SalesforceInteractions;
-    if (!SI) return;
-
-    try { SI.setLoggingLevel(5); } catch (e) { log("setLoggingLevel error: " + e); }
-
-    SI.init({
-      // cookieDomain: leave unset, or set it to whatever domain this page
-      // actually runs on. If it ends up embedded via a sandboxed iframe (a
-      // different domain entirely), just let the SDK use the current domain
-      // instead of hardcoding one.
-      consents: [
-        { provider: "TestIngest Page", purpose: "Tracking", status: "Opt In" }
-      ]
-    }).then(function () {
-      SI_READY = true;
-      setStatus("initStatus", "ok", "SI.init: success, sitemap is ready.");
-      log("SalesforceInteractions.init() resolved OK.");
-
-      var pageTypes = [
-        { name: "test_home", isMatch: function () { return true; }, interaction: { name: "Test_Home_View" } }
-      ];
-
-      SI.initSitemap({
-        global: {
-          locale: "en_US",
-          onActionEvent: function (ae) {
-            try {
-              ae.interaction = ae.interaction || {};
-              if (!ae.interaction.name) ae.interaction.name = "Test_Unnamed_Event";
-            } catch (e) {}
-            return ae;
-          }
-        },
-        pageTypes: pageTypes,
-        pageTypeDefault: { name: "test_default", interaction: { name: "Test_Page_View" } }
-      });
-      log("initSitemap() called — 1 page view event should fire now.");
-    }).catch(function (e) {
-      setStatus("initStatus", "fail", "SI.init: FAILED — see log.");
-      log("SI.init failed: " + e);
-    });
-  }
-
-  if (window.SalesforceInteractions) {
-    boot();
-  } else {
-    var tries = 0;
-    var poll = setInterval(function () {
-      if (window.SalesforceInteractions) { clearInterval(poll); boot(); }
-      else if (++tries > 100) { clearInterval(poll); log("Beacon never became ready after 10s."); }
-    }, 100);
-  }
+  // This page does NOT call SI.init()/initSitemap() itself — that logic
+  // lives in the file uploaded via Setup > Websites & Mobile Apps >
+  // this connector > Replace Sitemap (currently sitemap_v4.js), which the
+  // beacon fetches and runs on its own once it loads. This page only waits
+  // for that to finish, then exposes manual buttons for testing.
+  var tries = 0;
+  var poll = setInterval(function () {
+    if (window.SalesforceInteractions) {
+      clearInterval(poll);
+      setStatus("siStatus", "ok", "SalesforceInteractions is available (sitemap from Setup has run).");
+      log("window.SalesforceInteractions detected.");
+    } else if (++tries > 150) {
+      clearInterval(poll);
+      setStatus("siStatus", "fail", "SalesforceInteractions never became available after 15s — check the beacon script and the uploaded sitemap.");
+      log("Gave up waiting for SalesforceInteractions.");
+    }
+  }, 100);
 
   var manualCounter = 0;
   document.getElementById("btnSendPageview").addEventListener("click", function () {
-    if (!SI_READY) { log("Init not finished yet, try again shortly."); return; }
+    if (!window.SalesforceInteractions) { log("Not ready yet, try again shortly."); return; }
     window.SalesforceInteractions.sendEvent({
       interaction: { name: "Test_Manual_Pageview" }
     });
@@ -134,7 +89,7 @@ data stream/sitemap can ingest into Data Cloud</p>
   });
 
   document.getElementById("btnSendTest").addEventListener("click", function () {
-    if (!SI_READY) { log("Init not finished yet, try again shortly."); return; }
+    if (!window.SalesforceInteractions) { log("Not ready yet, try again shortly."); return; }
     manualCounter++;
     window.SalesforceInteractions.sendEvent({
       interaction: {
