@@ -2,103 +2,74 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Data Cloud Ingest Test</title>
+<title>GTM Duplicate-Load Repro</title>
 <style>
   body { font-family: -apple-system, Arial, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #222; }
   h1 { font-size: 20px; }
-  button { font-size: 15px; padding: 10px 18px; margin: 6px 8px 6px 0; cursor: pointer; }
   #log { background: #111; color: #0f0; font-family: Menlo, monospace; font-size: 12px; padding: 12px;
-         border-radius: 6px; height: 340px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
-  .status { padding: 8px 12px; border-radius: 6px; margin: 10px 0; font-weight: bold; }
-  .status.pending { background: #fff3cd; }
-  .status.ok      { background: #d4edda; }
-  .status.fail    { background: #f8d7da; }
+         border-radius: 6px; height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .note { background: #fff3cd; padding: 10px 14px; border-radius: 6px; margin: 12px 0; }
 </style>
+
+<!-- STEP 1 of setup: this must be the very first script, loaded normally
+     (no type="text/plain") — it is what re-activates the delayed GTM loader
+     below once the visitor interacts. See delay-js-simulator.js for details. -->
+<script src="delay-js-simulator.js"></script>
+
+<!-- STEP 2 of setup: container GTM-T86R2LWF wired up below. This is the
+     STANDARD GTM head snippet, just wrapped in type="text/plain" so the
+     browser leaves it inert until delay-js-simulator.js reactivates it on
+     first interaction — reproducing exactly how LiteSpeed wraps GTM's own
+     loader on custodian.com.au (see home.html's own source: the container
+     script there is inside <script type="litespeed/javascript">). -->
+<script type="text/plain" data-delayed>
+(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});
+var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';
+j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-T86R2LWF');
+</script>
 </head>
 <body>
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-T86R2LWF"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
 
-<h1>Data Cloud — Ingest Test Page</h1>
-<p>Simple test page, not a replacement for the real website — only used to check whether a data
-stream ingests into Data Cloud. This page carries NO sitemap logic of its own — SI.init() and
-initSitemap() are expected to come from whatever is uploaded via Setup's "Replace Sitemap" for this
-connector, exactly like the real deployment model for custodian.com.au will work. This page only
-loads the beacon and exposes a couple of manual test buttons.</p>
+<h1>GTM Duplicate-Load Repro Page</h1>
+<p>Purpose: deliberately reproduce the exact bug found on custodian.com.au — a beacon script tag
+loaded through GTM, where the GTM tag itself is configured with more than one trigger, causing it to
+fire (and re-load/re-init the beacon) more than once per page view. This page is for practicing the
+diagnosis + fix in a safe, disposable environment, not for real tracking.</p>
 
-<div id="siStatus" class="status pending">SalesforceInteractions: not ready yet...</div>
-
-<button id="btnSendPageview">Send Test Pageview</button>
-<button id="btnSendTest">Send Test Event (each click is a new event)</button>
+<div class="note">
+  <strong>Setup checklist</strong> (see chat for full steps): container <code>GTM-T86R2LWF</code> is
+  already wired up above. Remaining steps:
+  1) In GTM, create a Custom HTML tag containing your testIngest connector's beacon
+  <code>&lt;script src="https://cdn.c360a.salesforce.com/beacon/c360a/f4bb63bd-.../c360a.min.js"&gt;&lt;/script&gt;</code>.
+  2) Attach it to <strong>two</strong> triggers on purpose (e.g. "All Pages" + "Window Loaded") to reproduce
+  the duplicate load. 3) Publish. 4) Reload this page, move your mouse over it once (delay-js-simulator.js
+  needs that to activate GTM, matching how LiteSpeed behaves) and check Network for the beacon/authentication
+  calls firing twice.
+</div>
 
 <h3>Log</h3>
 <pre id="log"></pre>
 
-<script id="beaconScript"
-        src="https://cdn.c360a.salesforce.com/beacon/c360a/f4bb63bd-2cf4-42d3-81a6-6667cb2e8b2f/scripts/c360a.min.js"></script>
-
 <script>
 (function () {
   "use strict";
-  if (window.__testIngestPageBooted) return;
-  window.__testIngestPageBooted = true;
-
   var logEl = document.getElementById("log");
   function log(msg) {
     var t = new Date().toISOString().split("T")[1].replace("Z", "");
     logEl.textContent += "[" + t + "] " + msg + "\n";
     logEl.scrollTop = logEl.scrollHeight;
-    console.log(msg);
   }
-  function setStatus(id, cls, text) {
-    var el = document.getElementById(id);
-    el.className = "status " + cls;
-    el.textContent = text;
-  }
-
-  document.getElementById("beaconScript").addEventListener("load", function () {
-    log("c360a.min.js loaded OK.");
-  });
-  document.getElementById("beaconScript").addEventListener("error", function () {
-    log("c360a.min.js failed to load.");
-  });
-
-  // This page does NOT call SI.init()/initSitemap() itself — that logic
-  // lives in the file uploaded via Setup > Websites & Mobile Apps >
-  // this connector > Replace Sitemap (currently sitemap_v4.js), which the
-  // beacon fetches and runs on its own once it loads. This page only waits
-  // for that to finish, then exposes manual buttons for testing.
-  var tries = 0;
-  var poll = setInterval(function () {
-    if (window.SalesforceInteractions) {
-      clearInterval(poll);
-      setStatus("siStatus", "ok", "SalesforceInteractions is available (sitemap from Setup has run).");
-      log("window.SalesforceInteractions detected.");
-    } else if (++tries > 150) {
-      clearInterval(poll);
-      setStatus("siStatus", "fail", "SalesforceInteractions never became available after 15s — check the beacon script and the uploaded sitemap.");
-      log("Gave up waiting for SalesforceInteractions.");
-    }
-  }, 100);
-
-  var manualCounter = 0;
-  document.getElementById("btnSendPageview").addEventListener("click", function () {
-    if (!window.SalesforceInteractions) { log("Not ready yet, try again shortly."); return; }
-    window.SalesforceInteractions.sendEvent({
-      interaction: { name: "Test_Manual_Pageview" }
-    });
-    log("Manually sent: Test_Manual_Pageview");
-  });
-
-  document.getElementById("btnSendTest").addEventListener("click", function () {
-    if (!window.SalesforceInteractions) { log("Not ready yet, try again shortly."); return; }
-    manualCounter++;
-    window.SalesforceInteractions.sendEvent({
-      interaction: {
-        name: "Test_Manual_Event",
-        attributes: { testSeq: manualCounter, clickedAt: new Date().toISOString() }
-      }
-    });
-    log("Manually sent: Test_Manual_Event #" + manualCounter);
-  });
+  var origLog = console.log;
+  console.log = function () {
+    origLog.apply(console, arguments);
+    try { log(Array.prototype.slice.call(arguments).join(" ")); } catch (e) {}
+  };
+  log("Page loaded. Move your mouse over the page to trigger delay-js-simulator.js and load GTM.");
 })();
 </script>
 
